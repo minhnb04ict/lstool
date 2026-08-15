@@ -1,0 +1,713 @@
+<!DOCTYPE html>
+<html lang="vi">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title><%= title %></title>
+    <link rel="stylesheet" href="/css/style.css" />
+  </head>
+  <body>
+    <main class="app">
+      <section class="card">
+        <div class="page-heading">
+          <h1 id="pageTitle" style="cursor: pointer;">📚 Quản lý học tập </h1>
+          <button id="galleryBtn" class="gallery-btn hidden" type="button">XEM</button>
+        </div>
+        <p id="message" class="message hidden"><%= message %></p>
+
+        <div id="screen-class">
+          <h2>Con học lớp nào?</h2>
+          <label class="field-label" for="classSelect">Chọn lớp</label>
+          <select id="classSelect" class="select-input">
+            <option value="">-- Chọn lớp --</option>
+            <% classes.forEach((cls) => { %>
+              <option value="<%= cls %>"><%= cls %></option>
+            <% }); %>
+          </select>
+        </div>
+
+        <div id="screen-student" class="hidden">
+          <h2>Con tên là gì?</h2>
+          <label class="field-label" for="studentSelect">Chọn tên</label>
+          <select id="studentSelect" class="select-input"></select>
+          <div class="actions">
+            <button id="backToClassBtn" class="big-btn secondary">← ĐỔI LỚP</button>
+          </div>
+        </div>
+
+        <div id="screen-confirm" class="hidden">
+          <h2 id="welcomeText">Xin chào!</h2>
+          <p id="studentSummary" class="muted"></p>
+          <div class="actions">
+            <button id="confirmBtn" class="big-btn">ĐÚNG RỒI</button>
+            <button id="changeBtn" class="big-btn secondary">ĐỔI TÊN</button>
+            <button id="changeClassBtn" class="big-btn secondary">ĐỔI LỚP</button>
+          </div>
+        </div>
+
+        <div id="screen-upload" class="hidden">
+          <h2>Con hãy thêm bài làm vào đây để nộp nhé!</h2>
+          <label class="field-label" for="weekSelect">Chọn tuần bài học</label>
+          <select id="weekSelect" class="select-input">
+            <option value="">-- Chọn tuần --</option>
+          </select>
+          <section id="assignmentLinks" class="assignment-links hidden" aria-label="Link bài tập">
+            <h3>Bài tập tuần này</h3>
+            <div id="assignmentLinksList" class="assignment-links-list"></div>
+          </section>
+          <div class="actions">
+            <button id="pasteBtn" class="big-btn">📋 DÁN</button>
+            <label class="big-btn secondary upload-label">
+              <input id="fileInput" type="file" accept=".jpg,.jpeg,.png,.pdf,.doc,.docx,.ppt,.pptx" />
+              📁 TẢI LÊN
+            </label>
+          </div>
+
+          <div id="fileList" class="file-list"></div>
+          <div class="actions submit-row">
+            <button id="submitBtn" class="big-btn success" disabled>✅ NỘP BÀI</button>
+          </div>
+        </div>
+
+        <div id="screen-success" class="hidden">
+          <div class="success-box">
+            <h2>🎉 CON ĐÃ NỘP BÀI THÀNH CÔNG!</h2>
+            <p id="successName"></p>
+            <p id="successClass"></p>
+            <p id="successTime"></p>
+            <p id="successCode"></p>
+            <div class="actions">
+              <button id="finishBtn" class="big-btn">HOÀN THÀNH</button>
+              <button id="againBtn" class="big-btn secondary">NỘP LẠI BÀI</button>
+            </div>
+          </div>
+        </div>
+
+        <div id="screen-gallery" class="hidden">
+          <div class="gallery-heading">
+            <h2>🎨 SẢN PHẨM CỦA CÁC BẠN</h2>
+            <button id="closeGalleryBtn" class="small-btn secondary" type="button">← QUAY LẠI</button>
+          </div>
+          <label class="field-label" for="galleryWeekSelect">Chọn tuần</label>
+          <select id="galleryWeekSelect" class="select-input"></select>
+          <div class="gallery-controls">
+            <p id="galleryCount" class="gallery-count">Đã nộp: 0 bài</p>
+            <label class="field-label compact-label" for="gallerySearchInput">Tìm tên</label>
+            <input id="gallerySearchInput" class="select-input compact-select" type="search" placeholder="Nhập tên học sinh" autocomplete="off" />
+            <label class="field-label compact-label" for="gallerySortSelect">Sắp xếp</label>
+            <select id="gallerySortSelect" class="select-input compact-select">
+              <option value="time-desc">Mới nhất trước</option>
+              <option value="time-asc">Cũ nhất trước</option>
+              <option value="name-asc">Tên A-Z</option>
+              <option value="name-desc">Tên Z-A</option>
+            </select>
+          </div>
+          <div id="galleryList" class="gallery-list"></div>
+        </div>
+
+        <p id="statusMessage" class="status"></p>
+      </section>
+    </main>
+
+    <script>
+      const MAX_FILE_SIZE_BYTES = 5 * 1024 * 1024;
+      const MAX_FILES = 1;
+      const state = { selectedClass: '', selectedStudent: null, selectedWeek: '', selectedWeekLabel: '', weeks: [], files: [], isSubmitting: false, previousScreen: 'screen-class', gallerySort: 'time-desc', galleryQuery: '', galleryItems: [], galleryCache: {} };
+
+      function showScreen(id) {
+        document.querySelectorAll('[id^="screen-"]').forEach((element) => element.classList.add('hidden'));
+        document.getElementById(id).classList.remove('hidden');
+        const canViewGallery = Boolean(state.selectedStudent) && !['screen-class', 'screen-student', 'screen-gallery'].includes(id);
+        document.getElementById('galleryBtn').classList.toggle('hidden', !canViewGallery);
+      }
+
+      function showMessage(text, isError = false) {
+        const box = document.getElementById('message');
+        box.textContent = text || '';
+        box.className = isError ? 'message error' : 'message';
+      }
+
+      function setStatus(text, isError = false) {
+        const box = document.getElementById('statusMessage');
+        box.textContent = text || '';
+        box.className = isError ? 'status error' : 'status';
+      }
+
+      function renderWeeks(weeks) {
+        const select = document.getElementById('weekSelect');
+        select.innerHTML = '<option value="">-- Chọn tuần --</option>';
+        const sortedWeeks = [...weeks].sort((first, second) => {
+          const firstNumber = Number.parseInt(String(first.value).match(/\d+/)?.[0], 10);
+          const secondNumber = Number.parseInt(String(second.value).match(/\d+/)?.[0], 10);
+
+          if (Number.isFinite(firstNumber) && Number.isFinite(secondNumber)) {
+            return secondNumber - firstNumber;
+          }
+          return String(second.label || second.value).localeCompare(String(first.label || first.value), 'vi');
+        });
+        state.weeks = sortedWeeks;
+
+        sortedWeeks.forEach((week) => {
+          const option = document.createElement('option');
+          option.value = week.value;
+          option.textContent = week.label;
+          if (week.content) {
+            option.dataset.content = week.content;
+          }
+          select.appendChild(option);
+        });
+
+        // The first item is the newest week after sorting.
+        const latestWeek = sortedWeeks[0];
+
+        if (latestWeek) {
+          select.value = latestWeek.value;
+          state.selectedWeek = latestWeek.value;
+          state.selectedWeekLabel = latestWeek.label || `Tuần ${latestWeek.value}`;
+          renderAssignmentLinks(latestWeek);
+        }
+      }
+
+      function renderAssignmentLinks(week) {
+        const section = document.getElementById('assignmentLinks');
+        const list = document.getElementById('assignmentLinksList');
+        const links = Array.isArray(week?.links) ? week.links : [];
+
+        list.innerHTML = '';
+        section.classList.toggle('hidden', !links.length);
+        links.forEach((link, index) => {
+          const anchor = document.createElement('a');
+          anchor.className = 'assignment-link';
+          anchor.href = link;
+          anchor.target = '_blank';
+          anchor.rel = 'noopener noreferrer';
+          anchor.textContent = `MỞ BÀI TẬP ${index + 1}`;
+          list.appendChild(anchor);
+        });
+      }
+
+      async function loadWeeks() {
+        try {
+          const response = await fetch('/api/weeks');
+          const result = await response.json();
+          if (result.success) {
+            renderWeeks(result.weeks || []);
+          }
+        } catch (err) {
+          console.error(err);
+        }
+      }
+
+      function renderGalleryWeeks() {
+        const select = document.getElementById('galleryWeekSelect');
+        select.innerHTML = '';
+        state.weeks.forEach((week) => {
+          const option = document.createElement('option');
+          option.value = week.value;
+          option.textContent = week.label;
+          select.appendChild(option);
+        });
+        if (state.selectedWeek) select.value = state.selectedWeek;
+      }
+
+      function getSubmittedTime(item) {
+        if (Number.isFinite(Number(item.createdAtMs))) {
+          return Number(item.createdAtMs);
+        }
+
+        const match = String(item.createdAt || '').match(/^(\d{2})\/(\d{2})\/(\d{4})\s+(\d{2}):(\d{2})/);
+        if (!match) return 0;
+
+        const [, day, month, year, hour, minute] = match;
+        return new Date(Number(year), Number(month) - 1, Number(day), Number(hour), Number(minute)).getTime();
+      }
+
+      function normalizeSearchText(text) {
+        return String(text || '')
+          .normalize('NFD')
+          .replace(/[\u0300-\u036f]/g, '')
+          .replace(/đ/g, 'd')
+          .replace(/Đ/g, 'D')
+          .toLowerCase()
+          .trim();
+      }
+
+      function getGalleryCacheKey(week) {
+        return [
+          state.selectedStudent?.classId || '',
+          week?.value || '',
+          week?.label || ''
+        ].join('|');
+      }
+
+      function getGalleryStudentName(item) {
+        if (item.studentName) return item.studentName;
+
+        const parts = String(item.name || '').split('_');
+        if (parts.length >= 4) {
+          return parts.slice(1, -2).join('_') || item.name;
+        }
+
+        return item.name || '';
+      }
+
+      function getLastNameForSort(item) {
+        const studentName = getGalleryStudentName(item).trim();
+        const nameParts = studentName.split(/\s+/).filter(Boolean);
+        return normalizeSearchText(nameParts[nameParts.length - 1] || studentName);
+      }
+
+      function compareGalleryItems(first, second) {
+        if (state.gallerySort === 'time-asc' || state.gallerySort === 'time-desc') {
+          const firstTime = getSubmittedTime(first);
+          const secondTime = getSubmittedTime(second);
+          return state.gallerySort === 'time-asc' ? firstTime - secondTime : secondTime - firstTime;
+        }
+
+        const nameCompare = getLastNameForSort(first).localeCompare(getLastNameForSort(second), 'vi');
+        if (nameCompare !== 0) {
+          return state.gallerySort === 'name-asc' ? nameCompare : -nameCompare;
+        }
+
+        return normalizeSearchText(getGalleryStudentName(first)).localeCompare(normalizeSearchText(getGalleryStudentName(second)), 'vi');
+      }
+
+      function renderGalleryItems(week) {
+        const list = document.getElementById('galleryList');
+        const count = document.getElementById('galleryCount');
+        const query = normalizeSearchText(state.galleryQuery);
+        const totalItems = state.galleryItems.length;
+        const filteredItems = state.galleryItems
+          .filter((item) => {
+            if (!query) return true;
+            return normalizeSearchText(getGalleryStudentName(item)).includes(query);
+          })
+          .sort(compareGalleryItems);
+
+        list.innerHTML = '';
+        count.textContent = query
+          ? `Đã nộp: ${filteredItems.length}/${totalItems} bài`
+          : `Đã nộp: ${totalItems} bài`;
+
+        if (!filteredItems.length) {
+          list.textContent = totalItems
+            ? 'Không tìm thấy bài theo tên này.'
+            : 'Tuần này chưa có sản phẩm nào.';
+          return;
+        }
+
+        filteredItems.forEach((item) => {
+          const card = document.createElement('article');
+          card.className = 'gallery-item';
+          card.tabIndex = 0;
+          card.title = 'Nhấn để xem sản phẩm';
+          const openProduct = () => window.open(item.url, '_blank', 'noopener');
+          card.addEventListener('click', openProduct);
+          card.addEventListener('keydown', (event) => {
+            if (event.key === 'Enter' || event.key === ' ') {
+              event.preventDefault();
+              openProduct();
+            }
+          });
+
+          if (item.thumbnail) {
+            const image = document.createElement('img');
+            image.className = 'gallery-preview';
+            image.src = item.thumbnail;
+            image.alt = item.name;
+            card.appendChild(image);
+          } else {
+            const icon = document.createElement('div');
+            icon.className = 'gallery-file-icon';
+            icon.textContent = '📄';
+            card.appendChild(icon);
+          }
+
+          const studentName = document.createElement('p');
+          studentName.className = 'gallery-file-name';
+          studentName.textContent = getGalleryStudentName(item);
+          const name = document.createElement('p');
+          name.className = 'muted gallery-raw-name';
+          name.textContent = item.name;
+          const className = document.createElement('p');
+          className.className = 'muted';
+          className.textContent = item.className ? `Lớp ${item.className}` : '';
+          const date = document.createElement('p');
+          date.className = 'muted';
+          date.textContent = item.createdAt;
+          card.append(studentName, name, className, date);
+          list.appendChild(card);
+        });
+      }
+
+      async function loadGallery(forceReload = false) {
+        const select = document.getElementById('galleryWeekSelect');
+        const week = state.weeks.find((item) => item.value === select.value);
+        const list = document.getElementById('galleryList');
+        const count = document.getElementById('galleryCount');
+
+        if (!week) {
+          list.textContent = 'Chưa có tuần để xem.';
+          count.textContent = 'Đã nộp: 0 bài';
+          return;
+        }
+
+        const cacheKey = getGalleryCacheKey(week);
+        if (!forceReload && state.galleryCache[cacheKey]) {
+          state.galleryItems = state.galleryCache[cacheKey];
+          renderGalleryItems(week);
+          return;
+        }
+
+        list.textContent = 'Đang tải sản phẩm…';
+        count.textContent = 'Đang tải…';
+        try {
+          const params = new URLSearchParams({
+            weekValue: week.value,
+            weekLabel: week.label,
+            classId: state.selectedStudent.classId
+          });
+          const response = await fetch(`/api/gallery?${params}`);
+          const result = await response.json();
+          if (!result.success) throw new Error(result.message);
+
+          state.galleryItems = result.items || [];
+          state.galleryCache[cacheKey] = state.galleryItems;
+          renderGalleryItems(week);
+        } catch (error) {
+          list.textContent = error.message || 'Chưa tải được sản phẩm. Con thử lại nhé!';
+          count.textContent = 'Đã nộp: 0 bài';
+        }
+      }
+
+      function renderStudents(classId) {
+        fetch('/api/students')
+          .then((res) => res.json())
+          .then((result) => {
+            const students = (result.students || []).filter((student) => student.classId === classId);
+            const select = document.getElementById('studentSelect');
+            select.innerHTML = '<option value="">-- Chọn tên --</option>';
+            students.forEach((student) => {
+              const option = document.createElement('option');
+              option.value = student.studentId;
+              option.textContent = `${student.studentIndex ? `${student.studentIndex} ` : ''}${student.studentName}`.trim();
+              select.appendChild(option);
+            });
+            showScreen('screen-student');
+          });
+      }
+
+      document.getElementById('pageTitle').addEventListener('click', () => {
+        state.selectedClass = '';
+        state.selectedStudent = null;
+        document.getElementById('classSelect').value = '';
+        document.getElementById('studentSelect').innerHTML = '<option value="">-- Chọn tên --</option>';
+        showScreen('screen-class');
+        showMessage('Con chọn lớp nhé!');
+      });
+
+      document.getElementById('classSelect').addEventListener('change', (event) => {
+        state.selectedClass = event.target.value;
+        if (state.selectedClass) {
+          renderStudents(state.selectedClass);
+        }
+      });
+
+      document.getElementById('studentSelect').addEventListener('change', (event) => {
+        const studentId = event.target.value;
+        if (!studentId) {
+          state.selectedStudent = null;
+          return;
+        }
+        fetch('/api/students')
+          .then((res) => res.json())
+          .then((result) => {
+            const student = (result.students || []).find((item) => item.studentId === studentId && item.classId === state.selectedClass);
+            if (student) {
+              state.selectedStudent = student;
+              document.getElementById('welcomeText').textContent = `Xin chào ${student.studentName} 👋`;
+              document.getElementById('studentSummary').textContent = `Lớp ${student.classId}`;
+              showScreen('screen-confirm');
+            }
+          });
+      });
+
+      document.getElementById('confirmBtn').addEventListener('click', () => {
+        if (!state.selectedStudent) return;
+        showScreen('screen-upload');
+        showMessage('Con hãy thêm bài làm nhé!');
+      });
+
+      document.getElementById('weekSelect').addEventListener('change', (event) => {
+        const weekValue = event.target.value;
+        state.selectedWeek = weekValue;
+        const option = event.target.options[event.target.selectedIndex];
+        state.selectedWeekLabel = option && option.value ? (option.textContent || `Tuần ${weekValue}`) : '';
+        renderAssignmentLinks(state.weeks.find((week) => week.value === weekValue));
+      });
+
+      document.getElementById('changeBtn').addEventListener('click', () => {
+        state.selectedStudent = null;
+        document.getElementById('studentSelect').innerHTML = '<option value="">-- Chọn tên --</option>';
+        renderStudents(state.selectedClass);
+        showMessage('Con chọn lại tên của mình nhé!');
+      });
+
+      document.getElementById('backToClassBtn').addEventListener('click', () => {
+        state.selectedClass = '';
+        state.selectedStudent = null;
+        document.getElementById('classSelect').value = '';
+        document.getElementById('studentSelect').innerHTML = '<option value="">-- Chọn tên --</option>';
+        showScreen('screen-class');
+        showMessage('Con chọn lớp nhé!');
+      });
+
+      document.getElementById('changeClassBtn').addEventListener('click', () => {
+        document.getElementById('backToClassBtn').click();
+      });
+
+      document.getElementById('galleryBtn').addEventListener('click', () => {
+        state.previousScreen = Array.from(document.querySelectorAll('[id^="screen-"]'))
+          .find((element) => !element.classList.contains('hidden'))?.id || 'screen-class';
+        renderGalleryWeeks();
+        showScreen('screen-gallery');
+        loadGallery();
+      });
+
+      document.getElementById('closeGalleryBtn').addEventListener('click', () => {
+        showScreen(state.previousScreen);
+      });
+
+      document.getElementById('galleryWeekSelect').addEventListener('change', () => {
+        loadGallery();
+      });
+
+      document.getElementById('gallerySortSelect').addEventListener('change', (event) => {
+        state.gallerySort = event.target.value;
+        const week = state.weeks.find((item) => item.value === document.getElementById('galleryWeekSelect').value);
+        renderGalleryItems(week);
+      });
+
+      document.getElementById('gallerySearchInput').addEventListener('input', (event) => {
+        state.galleryQuery = event.target.value;
+        const week = state.weeks.find((item) => item.value === document.getElementById('galleryWeekSelect').value);
+        renderGalleryItems(week);
+      });
+
+      function addFiles(fileList) {
+        const files = Array.from(fileList);
+        const oversizedFile = files.find((file) => file.size > MAX_FILE_SIZE_BYTES);
+
+        if (oversizedFile) {
+          setStatus('Mỗi file chỉ được tối đa 5 MB. Con chọn file nhỏ hơn nhé!', true);
+          return;
+        }
+
+        if (state.files.length + files.length > MAX_FILES) {
+          setStatus('Mỗi lần con chỉ có thể nộp 1 file nhé!', true);
+          return;
+        }
+
+        files.forEach((file) => {
+          state.files.push({
+            name: file.name,
+            size: file.size,
+            type: file.type,
+            file,
+            previewUrl: file.type.startsWith('image/') ? URL.createObjectURL(file) : ''
+          });
+        });
+        renderFiles();
+      }
+
+      function clearFiles() {
+        state.files.forEach((item) => {
+          if (item.previewUrl) URL.revokeObjectURL(item.previewUrl);
+        });
+        state.files = [];
+      }
+
+      function renderFiles() {
+        const list = document.getElementById('fileList');
+        list.innerHTML = '';
+        if (!state.files.length) {
+          list.innerHTML = '<p class="muted">Con chưa thêm bài làm. Con hãy chụp màn hình bài làm rồi bấm DÁN, hoặc bấm TẢI LÊN để chọn file nhé.</p>';
+        } else {
+          state.files.forEach((item, index) => {
+            const row = document.createElement('div');
+            row.className = 'file-item';
+
+            const details = document.createElement('div');
+            details.className = 'file-details';
+            if (item.previewUrl) {
+              const preview = document.createElement('img');
+              preview.className = 'file-preview';
+              preview.src = item.previewUrl;
+              preview.alt = `Xem trước ${item.name}`;
+              details.appendChild(preview);
+            }
+
+            const name = document.createElement('span');
+            name.textContent = item.name;
+            details.appendChild(name);
+
+            const removeButton = document.createElement('button');
+            removeButton.className = 'remove-btn';
+            removeButton.dataset.index = index;
+            removeButton.textContent = '🗑';
+
+            row.append(details, removeButton);
+            list.appendChild(row);
+          });
+        }
+        document.getElementById('submitBtn').disabled = state.isSubmitting;
+      }
+
+      document.getElementById('fileList').addEventListener('click', (event) => {
+        if (event.target.classList.contains('remove-btn')) {
+          const index = Number(event.target.dataset.index);
+          const [removedFile] = state.files.splice(index, 1);
+          if (removedFile && removedFile.previewUrl) URL.revokeObjectURL(removedFile.previewUrl);
+          renderFiles();
+        }
+      });
+
+      document.getElementById('fileInput').addEventListener('change', (event) => {
+        addFiles(event.target.files);
+      });
+
+      document.getElementById('pasteBtn').addEventListener('click', async () => {
+        try {
+          if (navigator.clipboard && navigator.clipboard.read) {
+            const items = await navigator.clipboard.read();
+            const imageItem = Array.from(items).find((item) => item.types.some((type) => type.startsWith('image/')));
+            if (!imageItem) {
+              setStatus('Con chưa sao chép hình ảnh nào. Con hãy sao chép ảnh trước nhé!', true);
+              return;
+            }
+            const type = imageItem.types.find((t) => t.startsWith('image/'));
+            const blob = await imageItem.getType(type);
+            const file = new File([blob], 'pasted-image.png', { type: blob.type || 'image/png' });
+            addFiles([file]);
+            setStatus('Đã dán ảnh thành công.', false);
+          } else {
+            setStatus('Con nhấn Ctrl + V để dán ảnh nhé!', true);
+          }
+        } catch (err) {
+          setStatus('Con chưa sao chép hình ảnh nào. Con hãy sao chép ảnh trước nhé!', true);
+        }
+      });
+
+      document.addEventListener('paste', (event) => {
+        const item = Array.from(event.clipboardData?.items || []).find((entry) => entry.type.startsWith('image/'));
+        if (!item) return;
+        event.preventDefault();
+        const file = item.getAsFile();
+        if (file) {
+          addFiles([file]);
+          setStatus('Đã dán ảnh thành công.', false);
+        }
+      });
+
+      document.getElementById('submitBtn').addEventListener('click', async () => {
+        if (!state.selectedStudent || !state.selectedWeek) {
+          setStatus('Con chọn tuần bài học trước nhé!', true);
+          return;
+        }
+
+        if (!state.files.length) {
+          setStatus('Con chưa có bài để nộp. Con hãy chụp màn hình bài làm rồi bấm DÁN, hoặc bấm TẢI LÊN để chọn file nhé!', true);
+          return;
+        }
+
+        state.isSubmitting = true;
+        document.getElementById('submitBtn').disabled = true;
+        document.getElementById('submitBtn').textContent = 'Đang gửi...';
+        setStatus('Bài của con đang được gửi…', false);
+
+        try {
+          const fileReaders = state.files.map((item) => new Promise((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onload = () => {
+              const result = reader.result || '';
+              const base64 = result.split(',')[1] || '';
+              resolve({ name: item.name, size: item.size, type: item.type, base64 });
+            };
+            reader.onerror = () => reject(new Error('Không đọc được file.'));
+            reader.readAsDataURL(item.file);
+          }));
+
+          const filesWithBase64 = await Promise.all(fileReaders);
+          const payload = {
+            studentId: state.selectedStudent.studentId,
+            studentName: state.selectedStudent.studentName,
+            classId: state.selectedStudent.classId,
+            weekValue: state.selectedWeek,
+            weekLabel: state.selectedWeekLabel || `Tuần ${state.selectedWeek}`,
+            files: filesWithBase64
+          };
+
+          const response = await fetch('/api/submit', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+          });
+
+          const text = await response.text();
+          let result = {};
+          try {
+            result = text ? JSON.parse(text) : {};
+          } catch (error) {
+            result = {
+              success: false,
+              message: 'Máy chủ trả về dữ liệu không hợp lệ. Hãy kiểm tra lại URL Web App Apps Script trong file .env và deploy lại bằng quyền Anyone.'
+            };
+          }
+
+          if (!result.success) {
+            throw new Error(result.message || 'Chưa gửi được bài. Con thử lại nhé!');
+          }
+          const galleryCacheKey = [
+            state.selectedStudent.classId,
+            state.selectedWeek,
+            state.selectedWeekLabel || `Tuần ${state.selectedWeek}`
+          ].join('|');
+          delete state.galleryCache[galleryCacheKey];
+
+          document.getElementById('successName').textContent = `Họ tên: ${state.selectedStudent.studentName}`;
+          document.getElementById('successClass').textContent = `Lớp: ${state.selectedStudent.classId}`;
+          document.getElementById('successTime').textContent = `Thời gian: ${result.submittedAt}`;
+          document.getElementById('successCode').textContent = `Mã: ${result.submissionId}`;
+          showScreen('screen-success');
+          showMessage('Con đã nộp bài thành công!');
+          setStatus('', false);
+        } catch (err) {
+          setStatus(err.message || 'Chưa gửi được bài. Con thử lại nhé!', true);
+        } finally {
+          state.isSubmitting = false;
+          document.getElementById('submitBtn').disabled = false;
+          document.getElementById('submitBtn').textContent = '✅ NỘP BÀI';
+        }
+      });
+
+      document.getElementById('finishBtn').addEventListener('click', () => {
+        clearFiles();
+        state.selectedWeek = '';
+        state.selectedWeekLabel = '';
+        document.getElementById('weekSelect').value = '';
+        renderFiles();
+        showScreen('screen-class');
+        showMessage('Con chọn lớp nhé!');
+      });
+
+      document.getElementById('againBtn').addEventListener('click', () => {
+        clearFiles();
+        renderFiles();
+        showScreen('screen-upload');
+        showMessage('Con hãy thêm bài làm nhé!');
+      });
+
+      loadWeeks();
+    </script>
+  </body>
+</html>
