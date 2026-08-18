@@ -11,7 +11,10 @@
       <section class="card">
         <div class="page-heading">
           <h1 id="pageTitle" style="cursor: pointer;">📚 Quản lý học tập </h1>
-          <button id="galleryBtn" class="gallery-btn hidden" type="button">XEM</button>
+          <div class="heading-actions">
+            <button id="refreshBtn" class="small-btn refresh-btn hidden" type="button" title="Làm mới dữ liệu" aria-label="Làm mới dữ liệu">Làm mới</button>
+            <button id="galleryBtn" class="gallery-btn hidden" type="button">XEM</button>
+          </div>
         </div>
         <p id="message" class="message hidden"><%= message %></p>
 
@@ -112,25 +115,89 @@
     <script>
       const MAX_FILE_SIZE_BYTES = 5 * 1024 * 1024;
       const MAX_FILES = 1;
+      const REFRESH_COOLDOWN_MS = 30 * 1000;
+      const SAVED_STUDENT_KEY = 'lstool:selectedStudent';
       const state = { selectedClass: '', selectedStudent: null, selectedWeek: '', selectedWeekLabel: '', weeks: [], files: [], isSubmitting: false, previousScreen: 'screen-class', gallerySort: 'time-desc', galleryQuery: '', galleryItems: [], galleryCache: {} };
+      let refreshCooldownTimer = null;
 
       function showScreen(id) {
         document.querySelectorAll('[id^="screen-"]').forEach((element) => element.classList.add('hidden'));
         document.getElementById(id).classList.remove('hidden');
         const canViewGallery = Boolean(state.selectedStudent) && !['screen-class', 'screen-student', 'screen-gallery'].includes(id);
+        const canRefresh = Boolean(state.selectedStudent) && !['screen-class', 'screen-student', 'screen-confirm', 'screen-success'].includes(id);
         document.getElementById('galleryBtn').classList.toggle('hidden', !canViewGallery);
+        document.getElementById('refreshBtn').classList.toggle('hidden', !canRefresh);
       }
 
       function showMessage(text, isError = false) {
         const box = document.getElementById('message');
         box.textContent = text || '';
-        box.className = isError ? 'message error' : 'message';
+        box.className = text ? (isError ? 'message error' : 'message') : 'message hidden';
       }
 
       function setStatus(text, isError = false) {
         const box = document.getElementById('statusMessage');
         box.textContent = text || '';
         box.className = isError ? 'status error' : 'status';
+      }
+
+      function saveSelectedStudent(student) {
+        try {
+          localStorage.setItem(SAVED_STUDENT_KEY, JSON.stringify({
+            classId: student.classId,
+            studentId: student.studentId,
+            studentName: student.studentName
+          }));
+        } catch (error) {
+          console.error(error);
+        }
+      }
+
+      function clearSavedStudent() {
+        try {
+          localStorage.removeItem(SAVED_STUDENT_KEY);
+        } catch (error) {
+          console.error(error);
+        }
+      }
+
+      function setSelectedStudent(student, shouldSave = true) {
+        state.selectedClass = student.classId;
+        state.selectedStudent = student;
+        document.getElementById('classSelect').value = student.classId;
+        document.getElementById('studentSelect').innerHTML = '<option value="">-- Chọn tên --</option>';
+        document.getElementById('studentSelect').value = student.studentId;
+        document.getElementById('welcomeText').textContent = `Xin chào ${student.studentName} 👋`;
+        document.getElementById('studentSummary').textContent = `Lớp ${student.classId}`;
+        if (shouldSave) {
+          saveSelectedStudent(student);
+        }
+        showScreen('screen-confirm');
+      }
+
+      function startRefreshCooldown() {
+        const button = document.getElementById('refreshBtn');
+        const endsAt = Date.now() + REFRESH_COOLDOWN_MS;
+
+        clearInterval(refreshCooldownTimer);
+        button.disabled = true;
+
+        const updateButton = () => {
+          const secondsLeft = Math.ceil((endsAt - Date.now()) / 1000);
+
+          if (secondsLeft <= 0) {
+            clearInterval(refreshCooldownTimer);
+            refreshCooldownTimer = null;
+            button.disabled = false;
+            button.textContent = 'Làm mới';
+            return;
+          }
+
+          button.textContent = `Đợi ${secondsLeft}s`;
+        };
+
+        updateButton();
+        refreshCooldownTimer = setInterval(updateButton, 1000);
       }
 
       function renderWeeks(weeks) {
@@ -176,12 +243,14 @@
         list.innerHTML = '';
         section.classList.toggle('hidden', !links.length);
         links.forEach((link, index) => {
+          const url = typeof link === 'string' ? link : link.url;
+          const label = typeof link === 'string' ? '' : link.label;
           const anchor = document.createElement('a');
           anchor.className = 'assignment-link';
-          anchor.href = link;
+          anchor.href = url;
           anchor.target = '_blank';
           anchor.rel = 'noopener noreferrer';
-          anchor.textContent = `MỞ BÀI TẬP ${index + 1}`;
+          anchor.textContent = label || `MỞ BÀI TẬP ${index + 1}`;
           list.appendChild(anchor);
         });
       }
@@ -192,10 +261,12 @@
           const result = await response.json();
           if (result.success) {
             renderWeeks(result.weeks || []);
+            return true;
           }
         } catch (err) {
           console.error(err);
         }
+        return false;
       }
 
       function renderGalleryWeeks() {
@@ -349,14 +420,14 @@
         if (!week) {
           list.textContent = 'Chưa có tuần để xem.';
           count.textContent = 'Đã nộp: 0 bài';
-          return;
+          return false;
         }
 
         const cacheKey = getGalleryCacheKey(week);
         if (!forceReload && state.galleryCache[cacheKey]) {
           state.galleryItems = state.galleryCache[cacheKey];
           renderGalleryItems(week);
-          return;
+          return true;
         }
 
         list.textContent = 'Đang tải sản phẩm…';
@@ -374,14 +445,16 @@
           state.galleryItems = result.items || [];
           state.galleryCache[cacheKey] = state.galleryItems;
           renderGalleryItems(week);
+          return true;
         } catch (error) {
           list.textContent = error.message || 'Chưa tải được sản phẩm. Con thử lại nhé!';
           count.textContent = 'Đã nộp: 0 bài';
         }
+        return false;
       }
 
       function renderStudents(classId) {
-        fetch('/api/students')
+        return fetch('/api/students')
           .then((res) => res.json())
           .then((result) => {
             const students = (result.students || []).filter((student) => student.classId === classId);
@@ -394,16 +467,45 @@
               select.appendChild(option);
             });
             showScreen('screen-student');
+            return students;
           });
       }
 
+      async function restoreSavedStudent() {
+        let saved = null;
+        try {
+          saved = JSON.parse(localStorage.getItem(SAVED_STUDENT_KEY) || 'null');
+        } catch (error) {
+          clearSavedStudent();
+        }
+
+        if (!saved?.classId || !saved?.studentId) {
+          return false;
+        }
+
+        try {
+          const response = await fetch('/api/students');
+          const result = await response.json();
+          const student = (result.students || []).find((item) => (
+            item.studentId === saved.studentId && item.classId === saved.classId
+          ));
+
+          if (!student) {
+            clearSavedStudent();
+            return false;
+          }
+
+          setSelectedStudent(student, false);
+          showMessage('');
+          return true;
+        } catch (error) {
+          console.error(error);
+          return false;
+        }
+      }
+
       document.getElementById('pageTitle').addEventListener('click', () => {
-        state.selectedClass = '';
-        state.selectedStudent = null;
-        document.getElementById('classSelect').value = '';
-        document.getElementById('studentSelect').innerHTML = '<option value="">-- Chọn tên --</option>';
-        showScreen('screen-class');
-        showMessage('Con chọn lớp nhé!');
+        window.location.reload();
       });
 
       document.getElementById('classSelect').addEventListener('change', (event) => {
@@ -424,10 +526,7 @@
           .then((result) => {
             const student = (result.students || []).find((item) => item.studentId === studentId && item.classId === state.selectedClass);
             if (student) {
-              state.selectedStudent = student;
-              document.getElementById('welcomeText').textContent = `Xin chào ${student.studentName} 👋`;
-              document.getElementById('studentSummary').textContent = `Lớp ${student.classId}`;
-              showScreen('screen-confirm');
+              setSelectedStudent(student);
             }
           });
       });
@@ -435,7 +534,7 @@
       document.getElementById('confirmBtn').addEventListener('click', () => {
         if (!state.selectedStudent) return;
         showScreen('screen-upload');
-        showMessage('Con hãy thêm bài làm nhé!');
+        showMessage('');
       });
 
       document.getElementById('weekSelect').addEventListener('change', (event) => {
@@ -448,6 +547,7 @@
 
       document.getElementById('changeBtn').addEventListener('click', () => {
         state.selectedStudent = null;
+        clearSavedStudent();
         document.getElementById('studentSelect').innerHTML = '<option value="">-- Chọn tên --</option>';
         renderStudents(state.selectedClass);
         showMessage('Con chọn lại tên của mình nhé!');
@@ -456,10 +556,11 @@
       document.getElementById('backToClassBtn').addEventListener('click', () => {
         state.selectedClass = '';
         state.selectedStudent = null;
+        clearSavedStudent();
         document.getElementById('classSelect').value = '';
         document.getElementById('studentSelect').innerHTML = '<option value="">-- Chọn tên --</option>';
         showScreen('screen-class');
-        showMessage('Con chọn lớp nhé!');
+        showMessage('');
       });
 
       document.getElementById('changeClassBtn').addEventListener('click', () => {
@@ -472,6 +573,30 @@
         renderGalleryWeeks();
         showScreen('screen-gallery');
         loadGallery();
+      });
+
+      document.getElementById('refreshBtn').addEventListener('click', async () => {
+        const button = document.getElementById('refreshBtn');
+        const currentScreen = Array.from(document.querySelectorAll('[id^="screen-"]'))
+          .find((element) => !element.classList.contains('hidden'))?.id || '';
+
+        button.disabled = true;
+        button.textContent = 'Đang tải...';
+
+        try {
+          if (currentScreen === 'screen-gallery') {
+            const refreshed = await loadGallery(true);
+            setStatus(refreshed ? 'Đã làm mới danh sách sản phẩm.' : 'Chưa làm mới được danh sách sản phẩm. Con thử lại nhé!', !refreshed);
+            return;
+          }
+
+          const refreshed = await loadWeeks();
+          setStatus(refreshed ? 'Đã làm mới danh sách bài tập.' : 'Chưa làm mới được danh sách bài tập. Con thử lại nhé!', !refreshed);
+        } catch (error) {
+          setStatus(error.message || 'Chưa làm mới được dữ liệu. Con thử lại nhé!', true);
+        } finally {
+          startRefreshCooldown();
+        }
       });
 
       document.getElementById('closeGalleryBtn').addEventListener('click', () => {
@@ -697,17 +822,18 @@
         document.getElementById('weekSelect').value = '';
         renderFiles();
         showScreen('screen-class');
-        showMessage('Con chọn lớp nhé!');
+        showMessage('');
       });
 
       document.getElementById('againBtn').addEventListener('click', () => {
         clearFiles();
         renderFiles();
         showScreen('screen-upload');
-        showMessage('Con hãy thêm bài làm nhé!');
+        showMessage('');
       });
 
       loadWeeks();
+      restoreSavedStudent();
     </script>
   </body>
 </html>

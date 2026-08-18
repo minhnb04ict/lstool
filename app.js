@@ -58,12 +58,17 @@ async function fetchWeeksFromApi() {
   try {
     const response = await getGoogleJsonWithRetry(WEEKS_API_URL);
     const data = response.data || [];
+    const ignoredWeekColumns = new Set(['Tuần', 'Nội dung']);
     return (data || []).map((item) => ({
       value: String(item.Tuần || '').trim(),
       label: `Tuần ${item.Tuần || ''}`,
       content: item['Nội dung'] || '',
-      links: Array.from({ length: 6 }, (_, index) => String(item[`Link ${index + 1}`] || '').trim())
-        .filter((link) => /^https?:\/\//i.test(link))
+      links: Object.entries(item)
+        .filter(([key, value]) => !ignoredWeekColumns.has(key) && /^https?:\/\//i.test(String(value || '').trim()))
+        .map(([key, value]) => ({
+          label: key,
+          url: String(value || '').trim()
+        }))
     }));
   } catch (error) {
     console.error('Không tải được danh sách tuần:', error.message);
@@ -167,7 +172,7 @@ app.get('/', async (req, res) => {
     students,
     weeks,
     savedStudent: null,
-    message: 'Con chọn lớp nhé!'
+    message: ''
   });
 });
 
